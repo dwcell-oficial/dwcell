@@ -36,19 +36,47 @@ const observer = new IntersectionObserver(entries => {
 
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 
-// Pausa vídeos fora da viewport (economia em mobile)
+// Pausa vídeos fora da viewport (economia em mobile) + garante autoplay real
 const videos = document.querySelectorAll('video[autoplay]');
+
+function tryPlay(v) {
+  // iOS exige muted como atributo real antes do play() programático
+  v.muted = true;
+  v.defaultMuted = true;
+  const p = v.play();
+  if (p) p.catch(() => {});
+}
+
 const videoObserver = new IntersectionObserver(entries => {
   entries.forEach(entry => {
     const v = entry.target;
     if (entry.isIntersecting) {
-      v.play().catch(() => {});
+      tryPlay(v);
     } else {
       v.pause();
     }
   });
 }, { threshold: 0.15 });
-videos.forEach(v => videoObserver.observe(v));
+videos.forEach(v => {
+  videoObserver.observe(v);
+  // assim que o vídeo tiver dado suficiente, tenta tocar de novo
+  // (cobre o caso do autoplay nativo falhar por o vídeo ainda não estar pronto)
+  v.addEventListener('loadeddata', () => {
+    if (v.getBoundingClientRect().top < window.innerHeight) tryPlay(v);
+  });
+});
+
+// Fallback: iOS em Modo de Baixo Consumo bloqueia autoplay mesmo com
+// muted+playsinline — no primeiro toque/scroll do usuário (gesto real),
+// tenta tocar de novo qualquer vídeo que ainda esteja pausado.
+function unlockVideosOnce() {
+  videos.forEach(v => {
+    if (v.paused && v.getBoundingClientRect().top < window.innerHeight) tryPlay(v);
+  });
+}
+['touchstart', 'click', 'scroll'].forEach(evt => {
+  document.addEventListener(evt, unlockVideosOnce, { once: true, passive: true });
+});
 
 // Som dos reels reais: liberado por clique/toque (gesto do usuário)
 function setReelSound(video, on) {
